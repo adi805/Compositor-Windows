@@ -8,7 +8,13 @@
 #   - auto-runs on opened / reopened / ready_for_review, NOT on every push
 #     (add "synchronize" to github_action_config.pr_actions to also review pushes)
 #   - `/review`, `/describe`, `/improve` in a PR comment re-run on demand
-#   - cheap flash-tier model behind an [OI]-compatible endpoint
+#   - a flash-tier model behind an [OI]-compatible endpoint, chosen by measurement
+#     rather than by name. The first pick (a deepseek flash) spends its whole
+#     token budget on `reasoning_content` and returns empty content, so litellm
+#     burned 361s against its own 120s timeout and the review came back as
+#     "Failed to review PR". `ag/gemini-3.8-flash-high` answers an 8.7k-token
+#     diff in 4s with finish_reason=stop and no reasoning tokens at all, so
+#     CONFIG__AI_TIMEOUT is only a backstop here, not the mechanism keeping it alive.
 #
 # Security:
 #   - the action is pinned to a commit SHA, not a tag: a tag is a movable ref, so
@@ -56,9 +62,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI__KEY: ${{ secrets.PR_AGENT_KEY }}
           OPENAI__API_BASE: "https://api.inferhub.dev/v1"
-          CONFIG__MODEL: "openai/ali/deepseek-v4.1-flash"
-          CONFIG__FALLBACK_MODELS: '["openai/ali/qwen3.8-flash"]'
+          CONFIG__MODEL: "openai/ag/gemini-3.8-flash-high"
+          CONFIG__FALLBACK_MODELS: '["openai/ag/gemini-3.7-flash-high"]'
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          CONFIG__AI_TIMEOUT: "300"
           PR_REVIEWER__REQUIRE_TESTS_REVIEW: "false"
           PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS_PER_CHUNK: "6"
           github_action_config.auto_review: "true"

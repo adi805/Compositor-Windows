@@ -1,0 +1,67 @@
+# PR-Agent (https://github.com/The-PR-Agent/pr-agent) - automated review for our PRs.
+#
+# Why this file exists: manual review of our own PRs kept missing things
+# (false-green CI, stale status lines), so review is now machine-run on every PR
+# and on demand from a comment.
+#
+# Cost control:
+#   - auto-runs on opened / reopened / ready_for_review, NOT on every push
+#     (add "synchronize" to github_action_config.pr_actions to also review pushes)
+#   - `/review`, `/describe`, `/improve` in a PR comment re-run on demand
+#   - cheap flash-tier model behind an [OI]-compatible endpoint
+#
+# Security:
+#   - the action is pinned to a commit SHA, not a tag: a tag is a movable ref, so
+#     the code running with PR_AGENT_KEY could change under us
+#   - contents is read-only; this job only posts review comments, so it has no
+#     reason to be able to push
+#   - issue_comment is restricted to the repo owner, so a stranger cannot burn
+#     the model key by commenting on a public PR. The bot check sits inside that
+#     branch only: at job level it also blocked Dependabot/Renovate PRs
+#   - pull_request only fires for branches inside this repo; GitHub does not hand
+#     secrets to fork PRs anyway
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: write
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  pr_agent:
+    name: Review
+    if: |
+      (github.event_name != 'issue_comment'
+        || (github.event.sender.type != 'Bot'
+            && github.event.issue.pull_request != null
+            && github.event.comment.user.login == 'adi805'))
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR Agent
+        uses: the-pr-agent/pr-agent@8e5a9295973b24af4b70cafd0b660a230811ef9e # v0.47.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI__KEY: ${{ secrets.PR_AGENT_KEY }}
+          OPENAI__API_BASE: "https://api.inferhub.dev/v1"
+          CONFIG__MODEL: "openai/ali/deepseek-v4.1-flash"
+          CONFIG__FALLBACK_MODELS: '["openai/ali/qwen3.8-flash"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          PR_REVIEWER__REQUIRE_TESTS_REVIEW: "false"
+          PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS_PER_CHUNK: "6"
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "false"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'

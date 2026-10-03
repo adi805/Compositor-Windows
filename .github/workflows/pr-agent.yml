@@ -64,7 +64,9 @@ jobs:
           OPENAI__API_BASE: "https://api.inferhub.dev/v1"
           CONFIG__MODEL: "openai/ag/gemini-3.8-flash-high"
           CONFIG__FALLBACK_MODELS: '["openai/ag/gemini-3.7-flash-high"]'
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "200000"
+          CONFIG__MAX_MODEL_TOKENS: "200000"
+          CONFIG__ENABLE_LARGE_PR_CHUNKING: "true"
           CONFIG__AI_TIMEOUT: "300"
           PR_REVIEWER__REQUIRE_TESTS_REVIEW: "false"
           PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS_PER_CHUNK: "6"

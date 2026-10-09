@@ -29,6 +29,9 @@ public static class UpdateStager
     /// <summary>Name of the executable the apply script restarts.</summary>
     public const string AppExecutable = "Compositor.App.exe";
 
+    /// <summary>Name of the launcher that runs the staged update.</summary>
+    public const string ApplyLauncherName = "apply-update.cmd";
+
     /// <summary>
     /// Verifies and stages a downloaded release. Every refusal reports a reason without touching the disk;
     /// only a confirmed, verified package produces files.
@@ -80,7 +83,7 @@ public static class UpdateStager
         Directory.CreateDirectory(staging);
         var stagedArchive = Path.Combine(staging, release.AssetName);
         File.Copy(archivePath, stagedArchive);
-        File.WriteAllText(Path.Combine(staging, "apply-update.cmd"), ApplyScript(stagedArchive, installDirectory));
+        File.WriteAllText(Path.Combine(staging, ApplyLauncherName), ApplyLauncher());
 
         return StageResult.Staged(staging, release.Tag, actual);
     }
@@ -97,23 +100,25 @@ public static class UpdateStager
 
     private static string Short(string? hash) => hash is { Length: >= 12 } ? hash[..12] : "none";
 
-    private static string ApplyScript(string archivePath, string installDirectory)
-    {
-        var executable = Path.Combine(installDirectory, AppExecutable);
-        return string.Join(
+    /// <summary>
+    /// The launcher the user runs after closing the app. It contains no paths of its own on purpose:
+    /// <c>%~dp0</c> is the folder the file sits in, so the executable beside it is found without anything
+    /// user-controlled ever entering a batch context. A path written into a <c>.cmd</c> is subject to
+    /// percent expansion, so a directory named <c>%TEMP%</c> would be rewritten before the command ran.
+    ///
+    /// All the work happens in the app itself, which is the point: quoting rules for nested batch and
+    /// PowerShell commands are the injection surface, and .NET passes paths as arguments without any.
+    /// </summary>
+    private static string ApplyLauncher() =>
+        string.Join(
             "\r\n",
             "@echo off",
-            "rem Unpacks the verified package over the install directory, then starts the new build.",
-            "rem The app was closed before this ran, so no file here is locked.",
-            "rem To abandon the update instead, delete this folder: nothing in the install is touched until",
-            "rem this script runs.",
-            "timeout /t 2 /nobreak >nul",
-            $"powershell -NoProfile -Command \"Expand-Archive -LiteralPath '{archivePath}' "
-                + $"-DestinationPath '{installDirectory}' -Force\"",
-            $"del /q \"{archivePath}\"",
-            $"start \"\" \"{executable}\"");
-    }
+            "rem Runs the staged update. Nothing is written here on purpose: %~dp0 is this file's folder,",
+            "rem so no path from the filesystem is ever expanded by the batch parser.",
+            $"\"%~dp0..\\{AppExecutable}\" --apply-update \"%~dp0.\"",
+            "exit /b %errorlevel%");
 }
+
 
 /// <summary>Outcome of a staging attempt: either where it landed, or why nothing was written.</summary>
 public readonly record struct StageResult(bool Succeeded, string Reason, string? StagingPath, string Tag, string? Sha256)

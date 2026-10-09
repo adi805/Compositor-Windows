@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Compositor.App;
 using Compositor.App.Update;
 using Compositor.Core.Update;
 using Xunit;
@@ -140,15 +141,34 @@ public sealed class UpdateStagerTests : IDisposable
     }
 
     [Fact]
-    public void TheApplyScriptNamesThePackageAndTheInstallAndNothingElseDeletes()
+    public void TheLauncherNamesNoPathOfItsOwn()
+    {
+        // The launcher is the only shell text left, and it deliberately contains no filesystem path:
+        // %~dp0 is the folder it sits in, so nothing user-controlled reaches the batch parser, which
+        // would expand a percent sign in a path before the command ran. Everything else happens in the
+        // app, where paths travel as arguments.
+        var result = UpdateStager.Stage(_install, _archive, Release(_hash), UpdateStager.ConfirmationPhrase);
+        var launcher = File.ReadAllText(Path.Combine(result.StagingPath!, UpdateStager.ApplyLauncherName));
+
+        Assert.StartsWith("@echo off", launcher, StringComparison.Ordinal);
+        Assert.Contains("%~dp0", launcher, StringComparison.Ordinal);
+        Assert.Contains(Program.ApplyUpdateSwitch, launcher, StringComparison.Ordinal);
+        Assert.Contains(UpdateStager.AppExecutable, launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain(_install, launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.GetFileName(_archive), launcher, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StagingProducesExactlyThePackageAndTheLauncher()
     {
         var result = UpdateStager.Stage(_install, _archive, Release(_hash), UpdateStager.ConfirmationPhrase);
-        var script = File.ReadAllText(Path.Combine(result.StagingPath!, "apply-update.cmd"));
 
-        Assert.StartsWith("@echo off", script, StringComparison.Ordinal);
-        Assert.Contains(Path.GetFileName(_archive), script, StringComparison.Ordinal);
-        Assert.Contains(UpdateStager.AppExecutable, script, StringComparison.Ordinal);
-        Assert.Contains("Expand-Archive", script, StringComparison.Ordinal);
+        var staged = Directory.GetFiles(result.StagingPath!, "*", SearchOption.AllDirectories)
+            .Select(f => Path.GetFileName(f) ?? string.Empty)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal([Path.GetFileName(_archive), UpdateStager.ApplyLauncherName], staged);
     }
 
     public void Dispose()

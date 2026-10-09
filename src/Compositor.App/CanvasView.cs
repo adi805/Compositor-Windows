@@ -11,6 +11,7 @@ using Avalonia.Platform;
 using Avalonia.Rendering;
 using Compositor.App.Rendering;
 using Compositor.Core;
+using Compositor.Core.Imaging;
 
 namespace Compositor.App;
 
@@ -45,7 +46,6 @@ public sealed class CanvasView : Control, ICustomHitTest
         set => SetValue(ViewModelProperty, value);
     }
 
-    private readonly Dictionary<Layer, (WriteableBitmap Bitmap, long Version, int Level)> _pixelCache = new();
     private readonly List<LayerRow> _attachedRows = new();
     private EditorViewModel? _attached;
     private Point? _panLast;
@@ -119,6 +119,10 @@ public sealed class CanvasView : Control, ICustomHitTest
         // outside it belongs to the ruler/checker area, so the stack is clipped to the canvas.
         // Disposed before the overlays below: the transform handles sit outside the canvas and have to show.
         var canvasClip = context.PushClip(canvasRect);
+
+        // Blank layers first, so the placeholder never sits on top of real pixels. A blank layer
+        // has nothing to contribute to the composite, and its tint is an editor affordance rather
+        // than content: drawn over the composite it would misreport what the file will contain.
         var tint = 0;
         foreach (var layer in LayerHierarchy.VisibleLayers(ViewModel.Doc.Layers))
         {
@@ -127,39 +131,7 @@ public sealed class CanvasView : Control, ICustomHitTest
                 continue;
             }
 
-            if (layer.Pixels is { } surface)
-            {
-                // The same placement the exporter computes: the rect the layer's own
-                // pixels land in, spun about that rect's centre. Seeing it and saving
-                // it have to agree, or the canvas is a lie.
-                var dest = Scaled(canvasRect, ViewModel.Doc, layer.Transform);
-                // Live adjustment preview replaces the active layer's own pixels.
-                var preview = layer == ViewModel.ActiveLayer ? ViewModel.AdjustmentPreviewSurface : null;
-                var source = preview ?? surface;
-                // Draw from the halved copy closest to the size it lands at. Resampling a big
-                // surface straight down in one step is exactly what makes it come out soft.
-                var factor = source.Width > 0 ? dest.Width / source.Width : 1d;
-                var (drawn, level) = DownsampleCache.Shared.For(source, factor);
-                var bitmap = preview is not null
-                    ? GetPreviewBitmap(drawn, level)
-                    : GetBitmap(layer, drawn, surface.Version, level);
-                if (bitmap is not null)
-                {
-                    var angle = layer.Transform.RotationDegrees;
-                    if (angle != 0)
-                    {
-                        using (context.PushTransform(LayerGeometry.RotationAbout(angle, dest.Center)))
-                        {
-                            context.DrawImage(bitmap, dest);
-                        }
-                    }
-                    else
-                    {
-                        context.DrawImage(bitmap, dest);
-                    }
-                }
-            }
-            else
+            if (layer.Pixels is null)
             {
                 // Blank layer: placeholder rect so it stays visible in the canvas.
                 context.FillRectangle(
@@ -168,6 +140,25 @@ public sealed class CanvasView : Control, ICustomHitTest
             }
 
             tint++;
+        }
+
+        // Pixel layers through the shared compositor. Drawing each surface straight into its
+        // placement rect applied neither opacity nor blend mode, so an opaque layer at zero
+        // opacity stayed on screen and disappeared from the export, and Multiply rendered as
+        // ordinary alpha-over: the canvas showed something the file would never contain.
+        // DrawingContext has no per-image blend mode, so parity is only reachable by compositing
+        // in Core (Flatten, the same call the PNG export makes) and drawing the result as one
+        // image. DownsampleCache still pre-reduces it, so a zoomed-out view is not scaled in one
+        // step.
+        if (Composite() is { } composite)
+        {
+            var factor = composite.Width > 0 ? canvasRect.Width / composite.Width : 1d;
+            var (drawn, level) = DownsampleCache.Shared.For(composite, factor);
+            var bitmap = GetCompositeBitmap(drawn, level);
+            if (bitmap is not null)
+            {
+                context.DrawImage(bitmap, canvasRect);
+            }
         }
 
         canvasClip.Dispose();
@@ -459,79 +450,88 @@ public sealed class CanvasView : Control, ICustomHitTest
     private static readonly IPen HandlePen = new Pen(Brushes.DodgerBlue, 1);
     private static readonly IBrush HandleFill = Brushes.White;
 
-    /// <summary>Layer pixel preview, rebuilt only when the surface Version moved.</summary>
-    private WriteableBitmap? _previewBitmap;
-    private long _previewGeneration = -1;
-    private int _previewLevel = -1;
+    private WriteableBitmap? _compositeBitmap;
+    private int _compositeBitmapLevel = -1;
+    private long _compositeSignature = long.MinValue;
+    private RasterSurface? _compositeSurface;
 
-    /// <summary>Adjustment preview bitmap, rebuilt only when the preview generation moved.</summary>
-    private WriteableBitmap? GetPreviewBitmap(RasterSurface preview, int level)
+    /// <summary>
+    /// The document composited with the same rules the exporter uses, or null when there is
+    /// nothing to draw. Rebuilt only when the signature below moves, because this is the whole
+    /// canvas stack and the ordinary case is a frame where nothing changed.
+    /// </summary>
+    private RasterSurface? Composite()
     {
-        var generation = ViewModel?.AdjustmentPreviewGeneration ?? -1;
-        if (_previewBitmap is not null && _previewGeneration == generation && _previewLevel == level)
-        {
-            return _previewBitmap;
-        }
-
-        _previewBitmap?.Dispose();
-        _previewBitmap = null;
-        _previewGeneration = generation;
-        _previewLevel = level;
-        WriteableBitmap bitmap;
-        try
-        {
-            bitmap = new WriteableBitmap(
-                new PixelSize(preview.Width, preview.Height),
-                new Vector(96, 96),
-                PixelFormats.Rgba8888,
-                AlphaFormat.Unpremul);
-            using var fb = bitmap.Lock();
-            Marshal.Copy(preview.Pixels, 0, fb.Address, preview.Pixels.Length);
-        }
-        catch (Exception)
+        if (ViewModel is not { } vm)
         {
             return null;
         }
 
-        _previewBitmap = bitmap;
-        return bitmap;
+        var signature = CompositeSignature(vm);
+        if (_compositeSurface is not null && _compositeSignature == signature)
+        {
+            return _compositeSurface;
+        }
+
+        _compositeBitmap?.Dispose();
+        _compositeBitmap = null;
+        _compositeBitmapLevel = -1;
+        _compositeSurface = null;
+        _compositeSignature = signature;
+
+        var (width, height, rgba) = Flatten.ToRgba(
+            vm.Doc,
+            // Live adjustment preview replaces the active layer's own pixels. The override is
+            // resolved here rather than in the compositor so both paths agree on which layer the
+            // sheet is currently editing.
+            layer => layer == vm.ActiveLayer ? vm.AdjustmentPreviewSurface : null);
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        _compositeSurface = new RasterSurface(width, height, rgba);
+        return _compositeSurface;
     }
 
-    private WriteableBitmap? GetBitmap(Layer layer, RasterSurface surface, long sourceVersion, int level)
+    /// <summary>
+    /// Everything the composite depends on. A layer's pixel edits are caught by its surface
+    /// Version; appearance edits (opacity, blend, visibility, placement) bump nothing, so they are
+    /// folded in by value. Getting this wrong shows a stale canvas, so it errs toward rebuilding.
+    /// </summary>
+    private static long CompositeSignature(EditorViewModel vm)
     {
-        if (_pixelCache.TryGetValue(layer, out var cached))
+        var hash = new HashCode();
+        hash.Add(vm.Doc.Width);
+        hash.Add(vm.Doc.Height);
+        hash.Add(vm.AdjustmentPreviewGeneration);
+        foreach (var layer in vm.Doc.Layers)
         {
-            // Keyed on the source surface's version, not the reduced copy's: a reduced copy is
-            // rebuilt from scratch on every call, so its own version never moves, and reusing it
-            // after a paint stroke would draw the pre-stroke pixels.
-            if (cached.Version == sourceVersion && cached.Level == level)
-            {
-                return cached.Bitmap;
-            }
-
-            cached.Bitmap.Dispose();
-            _pixelCache.Remove(layer);
+            hash.Add(layer.Id);
+            hash.Add(layer.ParentId);
+            hash.Add(layer.IsVisible);
+            hash.Add(layer.Opacity);
+            hash.Add(layer.Blend);
+            hash.Add(layer.Transform);
+            hash.Add(layer.Pixels?.Version ?? -1L);
         }
 
-        WriteableBitmap bitmap;
-        try
+        return hash.ToHashCode();
+    }
+
+    private WriteableBitmap? GetCompositeBitmap(RasterSurface surface, int level)
+    {
+        // Keyed on the reduced level as well: zooming out picks a different halved copy, and the
+        // bitmap has to follow it rather than keep drawing the previous level at the new size.
+        if (_compositeBitmap is not null && _compositeBitmapLevel == level)
         {
-            bitmap = new WriteableBitmap(
-                new PixelSize(surface.Width, surface.Height),
-                new Vector(96, 96),
-                PixelFormats.Rgba8888,
-                AlphaFormat.Unpremul);
-            using var fb = bitmap.Lock();
-            // 32bpp: framebuffer stride equals width*4; copy straight through.
-            Marshal.Copy(surface.Pixels, 0, fb.Address, surface.Pixels.Length);
-        }
-        catch (Exception)
-        {
-            return null; // headless/no-render-context: fall back to placeholder rendering
+            return _compositeBitmap;
         }
 
-        _pixelCache[layer] = (bitmap, sourceVersion, level);
-        return bitmap;
+        _compositeBitmap?.Dispose();
+        _compositeBitmap = CreateBitmap(surface.Width, surface.Height, surface.Pixels);
+        _compositeBitmapLevel = level;
+        return _compositeBitmap;
     }
 
     private void AttachRows()
@@ -602,6 +602,11 @@ public sealed class CanvasView : Control, ICustomHitTest
         _floatingBitmap?.Dispose();
         _floatingBitmap = null;
         _floatingSource = null;
+        _compositeBitmap?.Dispose();
+        _compositeBitmap = null;
+        _compositeBitmapLevel = -1;
+        _compositeSurface = null;
+        _compositeSignature = long.MinValue;
         if (_attached is null)
         {
             return;
@@ -611,15 +616,6 @@ public sealed class CanvasView : Control, ICustomHitTest
         _attached.Rows.CollectionChanged -= OnRowsChanged;
         _attached.ViewChanged -= OnViewChanged;
         _attached = null;
-        foreach (var entry in _pixelCache.Values)
-        {
-            entry.Bitmap.Dispose();
-        }
-
-        _pixelCache.Clear();
-        _previewBitmap?.Dispose();
-        _previewBitmap = null;
-        _previewGeneration = -1;
     }
 
     private static Rect Scaled(Rect canvasRect, Document doc, LayerTransform t)

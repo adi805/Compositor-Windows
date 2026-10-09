@@ -11,7 +11,22 @@ namespace Compositor.Core.Imaging;
 /// </summary>
 public static class Flatten
 {
-    public static (int Width, int Height, byte[] Rgba) ToRgba(Document doc)
+    public static (int Width, int Height, byte[] Rgba) ToRgba(Document doc) => ToRgba(doc, surfaceOverride: null);
+
+    /// <summary>
+    /// Flattens the stack, optionally substituting a layer's pixels.
+    ///
+    /// The override exists for the editor's live adjustment preview: the sheet shows the active
+    /// layer through an uncommitted filter, and the canvas has to show the same thing. Routing
+    /// that through the one compositor is the point. When the canvas drew surfaces itself it
+    /// applied neither opacity nor blend mode, so a fully transparent layer stayed visible on
+    /// screen and vanished from the PNG, and Multiply looked like plain alpha-over. There is no
+    /// per-image blend mode available to the drawing context, so the only way the two agree is
+    /// for the preview to be produced here, by this code, and drawn as a finished image.
+    /// </summary>
+    public static (int Width, int Height, byte[] Rgba) ToRgba(
+        Document doc,
+        Func<Layer, RasterSurface?>? surfaceOverride)
     {
         ArgumentNullException.ThrowIfNull(doc);
         var output = new byte[doc.Width * doc.Height * 4];
@@ -19,9 +34,16 @@ public static class Flatten
         // Hierarchy-aware: hidden groups hide their subtree; groups carry no pixels.
         foreach (var layer in LayerHierarchy.VisibleLayers(doc.Layers)) // bottom-first
         {
-            if (!layer.IsVisible || layer.Pixels is not { } src)
+            if (!layer.IsVisible)
             {
-                continue; // hidden or blank layers contribute nothing
+                continue; // hidden contributes nothing
+            }
+
+            // A preview surface replaces the layer's own pixels; a layer with neither is blank.
+            var src = surfaceOverride?.Invoke(layer) ?? layer.Pixels;
+            if (src is null)
+            {
+                continue;
             }
 
             if (src.Width <= 0 || src.Height <= 0)

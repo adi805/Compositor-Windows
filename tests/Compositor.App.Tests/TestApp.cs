@@ -11,5 +11,9 @@ public static class TestApp
 {
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions());
+            // Skia rather than the headless drawing stub, with the stub disabled, so a test can ask
+            // for the rendered frame. The stub records no pixels, which would make the canvas
+            // compositing tests unable to read back what was actually drawn.
+            .UseSkia()
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 }

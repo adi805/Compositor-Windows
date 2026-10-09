@@ -45,28 +45,78 @@ public static class ImageBudget
     /// Upstream JPEG sheet preview: <c>kCGImageSourceThumbnailMaxPixelSize: 1000</c>.
     public const int PreviewLongSide = 1_000;
 
-    /// True when a buffer of this size fits the side limits and the remaining document budget.
-    public static bool Fits(int width, int height, long pixelsAlreadyUsed = 0) =>
+    /// <summary>
+    /// Bytes an RGBA8 surface of this size needs, computed in 64-bit so it cannot wrap.
+    ///
+    /// Why this exists as its own member: the naive <c>width * height * 4</c> in 32-bit
+    /// arithmetic wraps silently past 2,147,483,647 bytes, and a wrapped product is either
+    /// negative (the allocation throws something unrelated) or a small positive number (the
+    /// allocation succeeds and the buffer is too short for the raster). At 30,000 x 20,000 the
+    /// true figure is 2,400,000,000 bytes, which is past <see cref="int.MaxValue"/>: exactly
+    /// the case the per-surface ceiling below is meant to stop before arithmetic matters.
+    /// </summary>
+    public static long RgbaByteCount(int width, int height) => width * (long)height * 4L;
+
+    /// <summary>
+    /// True when a single surface of this size is within the side limits AND the
+    /// per-surface ceiling. This is the check the export path always had and the import path
+    /// did not: the import path only consulted the document budget, which is scaled to the
+    /// machine's memory and can therefore be several times larger than one surface may be.
+    /// </summary>
+    public static bool FitsSurface(int width, int height) =>
         width >= 1 &&
         height >= 1 &&
         width <= MaxSide &&
         height <= MaxSide &&
-        (width * (long)height) + pixelsAlreadyUsed <= DocumentPixelBudget;
+        width * (long)height <= MaxSurfacePixels;
 
+    /// <summary>
+    /// True when a buffer of this size fits the side limits and the remaining document budget.
+    /// <paramref name="documentBudget"/> overrides the machine-scaled budget, which is what
+    /// boundary tests use: the real value depends on how much memory the host happens to have,
+    /// so a test that asserted against it would pass or fail by machine rather than by code.
+    /// </summary>
+    public static bool Fits(int width, int height, long pixelsAlreadyUsed = 0, long? documentBudget = null) =>
+        FitsSurface(width, height) &&
+        (width * (long)height) + pixelsAlreadyUsed <= (documentBudget ?? DocumentPixelBudget);
+
+    /// <summary>
     /// Throws <see cref="ImageFailure.ExportTooLarge"/> outside the single-surface ceiling.
+    /// </summary>
     public static void ValidateExport(int width, int height)
     {
-        if (width < 1 || height < 1 || width > MaxSide || height > MaxSide
-            || width * (long)height > MaxSurfacePixels)
+        if (!FitsSurface(width, height))
         {
             throw new ImageException(ImageFailure.ExportTooLarge);
         }
     }
 
+    /// <summary>
     /// Throws <see cref="ImageFailure.ImportTooLarge"/> when the image will not fit what is left.
-    public static void ValidateImport(int width, int height, long pixelsAlreadyUsed)
+    ///
+    /// Both ceilings are enforced here, not just the document budget. The document budget is
+    /// derived from the machine's memory, so on a large host it can be several times the
+    /// per-surface ceiling: an import of 30,000 x 20,000 (600 MP) passed the budget check and
+    /// then reached <c>rowBytes * height</c>, whose true value is 2.4 GB, past
+    /// <see cref="int.MaxValue"/>. That is a crash waiting for a big enough machine, and the
+    /// check that stops it is the per-surface one, which does not depend on the host at all.
+    /// </summary>
+    public static void ValidateImport(int width, int height, long pixelsAlreadyUsed, long? documentBudget = null)
     {
-        if (!Fits(width, height, pixelsAlreadyUsed))
+        if (!Fits(width, height, pixelsAlreadyUsed, documentBudget))
+        {
+            throw new ImageException(ImageFailure.ImportTooLarge);
+        }
+    }
+
+    /// <summary>
+    /// Throws when a canvas is outside the ceilings a canvas must satisfy: the side limit, the
+    /// per-surface ceiling, and the document budget. A canvas is a surface, so the per-surface
+    /// ceiling applies to it exactly as it does to an import or an export.
+    /// </summary>
+    public static void ValidateCanvas(int width, int height, long? documentBudget = null)
+    {
+        if (!Fits(width, height, 0, documentBudget))
         {
             throw new ImageException(ImageFailure.ImportTooLarge);
         }

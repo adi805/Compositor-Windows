@@ -7,6 +7,7 @@ on:
 
 jobs:
   build-test:
+    name: Uji Linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,5 +22,25 @@ jobs:
         run: dotnet test tests/Compositor.Core.Tests --no-build -c Release
       - name: Test (App)
         run: dotnet test tests/Compositor.App.Tests --no-build -c Release
-      - name: Smoke (App entry point)
+      - name: Smoke (rendering + native codecs)
+        run: dotnet run --project src/Compositor.App -c Release --no-build -- --smoke
+
+  # The product ships for Windows and this workflow only ever ran Ubuntu, so every Windows-specific
+  # path (the updater, the window layer, the native Skia asset for win-x64) was covered by nothing
+  # until a release tag published it.
+  windows:
+    name: Uji Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build
+        run: dotnet build Compositor.Windows.sln -c Release
+      - name: Test (Core)
+        run: dotnet test tests/Compositor.Core.Tests --no-build -c Release
+      - name: Test (App)
+        run: dotnet test tests/Compositor.App.Tests --no-build -c Release
+      - name: Smoke (rendering + native codecs)
         run: dotnet run --project src/Compositor.App -c Release --no-build -- --smoke

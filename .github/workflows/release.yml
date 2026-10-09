@@ -8,7 +8,80 @@ permissions:
   contents: write
 
 jobs:
+  # The gate. A tag used to publish straight from the publish step, so a tag on a commit that never
+  # passed CI produced a release nobody had tested. Every check here runs on the tagged commit, which
+  # is what `actions/checkout` gives on a tag push: the SHA the tag points at, not the branch tip.
+  gate:
+    name: Uji commit yang di-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Record the commit under test
+        run: |
+          expected=$(git rev-parse "${GITHUB_REF_NAME}^{commit}")
+          actual=$(git rev-parse HEAD)
+          echo "tag ${GITHUB_REF_NAME} -> ${expected}; checked out ${actual}"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::checked out ${actual} but the tag points at ${expected}; the tests would not cover the release"
+            exit 1
+          fi
+      - name: Restore
+        run: dotnet restore Compositor.Windows.sln
+      - name: Build
+        run: dotnet build Compositor.Windows.sln --no-restore -c Release
+      - name: Test (Core)
+        run: dotnet test tests/Compositor.Core.Tests --no-build -c Release
+      - name: Test (App)
+        run: dotnet test tests/Compositor.App.Tests --no-build -c Release
+      - name: Smoke (rendering + native codecs)
+        run: dotnet run --project src/Compositor.App -c Release --no-build -- --smoke
+
+  # Windows coverage, which this workflow never had: the release ships a win-x64 self-contained
+  # build, and nothing had ever run it on Windows. The packaged executable is started from the
+  # extracted zip exactly as a user would, so a missing native asset or a bad publish profile shows
+  # up here rather than in a bug report.
+  windows:
+    name: Uji Windows asli
+    needs: gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build
+        run: dotnet build Compositor.Windows.sln -c Release
+      - name: Test (Core)
+        run: dotnet test tests/Compositor.Core.Tests --no-build -c Release
+      - name: Test (App)
+        run: dotnet test tests/Compositor.App.Tests --no-build -c Release
+      - name: Publish (win-x64, self-contained)
+        run: dotnet publish src/Compositor.App -c Release -r win-x64 --self-contained true -o publish
+      - name: Smoke the published executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path "publish" "Compositor.App.exe"
+          if (-not (Test-Path $exe)) { throw "publish produced no $exe" }
+          & $exe --smoke
+          if ($LASTEXITCODE -ne 0) { throw "the published build failed its smoke check ($LASTEXITCODE)" }
+      - name: Smoke from the extracted zip
+        shell: pwsh
+        run: |
+          # The release asset is a zip the user unpacks, so the thing to test is the unpacked tree:
+          # a zip that drops a native library, or a path the executable cannot resolve once it moves,
+          # only shows up after extraction.
+          $zip = "Compositor-Windows-$($env:GITHUB_REF_NAME)-win-x64.zip"
+          Compress-Archive -Path "publish/*" -DestinationPath $zip
+          Expand-Archive -Path $zip -DestinationPath extracted
+          & (Join-Path "extracted" "Compositor.App.exe") --smoke
+          if ($LASTEXITCODE -ne 0) { throw "the extracted build failed its smoke check ($LASTEXITCODE)" }
+
   publish:
+    name: Terbitkan rilis
+    needs: [gate, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

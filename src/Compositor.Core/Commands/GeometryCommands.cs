@@ -238,7 +238,14 @@ public sealed class ImageSizeCommand : IUndoCommand
             layer.Transform = transform;
             layer.Pixels = pixels;
         }
-        _originals.Clear();
+
+        // The originals are NOT cleared. Clearing them here left _captured true, so a second Redo
+        // skipped CaptureOriginals() and the second Undo then walked an empty list: the document
+        // dimensions came back and the layer surfaces and transforms stayed at the resized values.
+        // A resize cannot be undone without the pre-resize pixels, so they are kept for the
+        // command's lifetime, which is what "retained on the redo stack" already implies. The
+        // surfaces are immutable in the relevant sense: ResampleBilinear returns a new instance,
+        // so the retained references stay valid and the history depth is unchanged.
         _doc.SetSize(_oldWidth, _oldHeight);
         _doc.Resolution = _oldResolution;
         _doc.Selection = null;

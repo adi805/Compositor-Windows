@@ -4,6 +4,15 @@
     <OutputType>Exe</OutputType>
     <!-- Reflection bindings keep the hand-rolled VM simple; revisit with compiled bindings later -->
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <!--
+      The publisher key the updater trusts, baked into the assembly at build time.
+
+      It is a build property rather than a downloaded value on purpose: a key that arrives over the same
+      channel as the package authenticates nothing, because whoever can serve one can serve the other.
+      The release workflow passes it from a repository variable, and a build made without it carries an
+      empty value, which the updater reports as "no publisher key" instead of quietly trusting everything.
+    -->
+    <CompositorUpdatePublicKey Condition="'$(CompositorUpdatePublicKey)' == ''"></CompositorUpdatePublicKey>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.22" />
@@ -13,5 +22,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Compositor.Core\Compositor.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>CompositorUpdatePublicKey</_Parameter1>
+      <_Parameter2>$(CompositorUpdatePublicKey)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>

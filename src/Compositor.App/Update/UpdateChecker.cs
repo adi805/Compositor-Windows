@@ -78,14 +78,29 @@ public sealed class UpdateChecker
                 return UpdateCheckResult.UpToDate(installedVersion);
             }
 
-            var resolved = ReleaseManifest.Resolve(release, await _readText(sumsUrl).ConfigureAwait(false));
+            var sums = await _readText(sumsUrl).ConfigureAwait(false);
+
+            // Publisher authentication, before the hashes inside the manifest are believed. The signature
+            // covers the manifest, so verifying it here is what makes every hash below trustworthy; doing
+            // it after would authenticate nothing, since the hash is what the signature is there to vouch
+            // for. A build with no pinned key accepts and says so in the result.
+            var signature = release.SignatureUrl is { Length: > 0 } signatureUrl
+                ? await _readText(signatureUrl).ConfigureAwait(false)
+                : null;
+            var trust = UpdateTrust.Check(sums, signature);
+            if (!trust.Trusted)
+            {
+                return UpdateCheckResult.Rejected(installedVersion, trust.Reason);
+            }
+
+            var resolved = ReleaseManifest.Resolve(release, sums);
             if (resolved is not { } candidate)
             {
                 return UpdateCheckResult.UpToDate(installedVersion);
             }
 
             return !candidate.IsPrerelease && AppVersion.IsNewer(candidate.Tag, installedVersion)
-                ? UpdateCheckResult.Available(candidate, installedVersion)
+                ? UpdateCheckResult.Available(candidate, installedVersion, trust.Reason)
                 : UpdateCheckResult.UpToDate(installedVersion);
         }
         catch (Exception error) when (error is HttpRequestException or IOException or TaskCanceledException
@@ -159,22 +174,38 @@ public sealed class UpdateChecker
 }
 
 /// <summary>Result of a version check: what is installed, and whether the feed offers anything newer.</summary>
-public readonly record struct UpdateCheckResult(string InstalledVersion, ReleaseInfo? Release, string? Error)
+public readonly record struct UpdateCheckResult(
+    string InstalledVersion,
+    ReleaseInfo? Release,
+    string? Error,
+    bool SignatureRejected = false,
+    string? Trust = null)
 {
     public bool HasRelease => Release is not null;
 
     public static UpdateCheckResult UpToDate(string installed) => new(installed, null, null);
 
-    public static UpdateCheckResult Available(ReleaseInfo release, string installed) => new(installed, release, null);
+    public static UpdateCheckResult Available(ReleaseInfo release, string installed, string? trust = null) =>
+        new(installed, release, null, SignatureRejected: false, trust);
 
     public static UpdateCheckResult Failed(string installed, string error) => new(installed, null, error);
+
+    /// <summary>
+    /// The release exists but its checksum manifest could not be authenticated. Kept distinct from
+    /// <see cref="Failed"/> because the two need different words: a network problem is transient and worth
+    /// retrying, a signature that does not verify is a release that must not be installed.
+    /// </summary>
+    public static UpdateCheckResult Rejected(string installed, string reason) =>
+        new(installed, null, reason, SignatureRejected: true);
 
     /// <summary>One line for the status strip: enough to act on, and no more.</summary>
     public string Summary => HasRelease
         ? $"Version {Release!.Value.Tag} is available. You have {InstalledVersion}. Confirm to install it."
-        : Error is { Length: > 0 }
-            ? $"Update check failed: {Error}"
-            : $"You are on the newest version ({InstalledVersion}).";
+        : SignatureRejected
+            ? $"Update refused: {Error}"
+            : Error is { Length: > 0 }
+                ? $"Update check failed: {Error}"
+                : $"You are on the newest version ({InstalledVersion}).";
 }
 
 /// <summary>Whether an install went ahead, and why not if it did not.</summary>

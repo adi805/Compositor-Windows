@@ -8,5 +8,19 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!--
+      Lock files, so a restore resolves the same graph on every machine and on every CI run.
+
+      Without this the dependency graph is whatever the feeds serve that day: a transitive package can be
+      republished or a floating range can resolve differently, and the build that produced a release is not
+      reproducible from its commit. With it, a locked restore refuses to resolve anything the committed
+      packages.lock.json does not already name.
+
+      Changing a package version means regenerating the lock file deliberately: run a plain restore and
+      commit the updated packages.lock.json in the same change.
+    -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
   </PropertyGroup>
 </Project>

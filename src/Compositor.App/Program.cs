@@ -9,20 +9,12 @@ public static class Program
 {
     public static int Main(string[] args)
     {
-        // `--smoke`: headless entry (CI) that exercises the document model and
-        // project I/O without opening a window. Default: launch the UI.
+        // `--smoke`: headless entry (CI) that renders, composites, and round-trips a project without
+        // opening a window. This is what a packaged build is checked against, so it exercises the
+        // native Skia codecs as well as the managed ones.
         if (args.Contains("--smoke"))
         {
-            var doc = new Document(64, 64);
-            doc.AddLayer(new Layer("Background"));
-            var path = Path.Combine(Path.GetTempPath(), $"compositor-smoke-{Guid.NewGuid():N}.comp");
-            ProjectStore.Save(doc, path);
-            var reloaded = ProjectStore.Load(path);
-            File.Delete(path);
-            Console.WriteLine(
-                $"Compositor.Windows pre-alpha: doc {reloaded.Width}x{reloaded.Height}, " +
-                $"layers={reloaded.Layers.Count}, round-trip OK");
-            return 0;
+            return Smoke.Run(Console.Out);
         }
 
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);

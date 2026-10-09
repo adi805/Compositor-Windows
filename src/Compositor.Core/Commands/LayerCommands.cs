@@ -126,36 +126,91 @@ public sealed class GroupLayersCommand : IUndoCommand
     }
 }
 
-/// <summary>Moves a layer within the stacking order (list index), restorable on undo.</summary>
+/// <summary>
+/// Moves a layer within the stacking order (list index), restorable on undo.
+///
+/// A group moves together with its descendants. Moving the group alone left its children behind,
+/// and when the group landed past one of them the list held a child before its parent: the project
+/// saved without complaint and then refused to reopen, so an ordinary drag could overwrite a
+/// usable file with an unreadable one. The block keeps its internal order and the layer's final
+/// index is the index of the block, clamped so the block stays inside the list.
+/// </summary>
 public sealed class ReorderLayerCommand : IUndoCommand
 {
     private readonly Document _doc;
     private readonly Layer _layer;
-    private readonly int _from;
     private readonly int _to;
+    private readonly List<Layer> _block;
+    private readonly int[] _blockIndices;
+    private readonly int _othersBefore;
 
     public ReorderLayerCommand(Document doc, Layer layer, int newIndex)
     {
         _doc = doc ?? throw new ArgumentNullException(nameof(doc));
         _layer = layer ?? throw new ArgumentNullException(nameof(layer));
-        _from = doc.Layers.IndexOf(layer);
-        if (_from < 0)
+        if (doc.Layers.IndexOf(layer) < 0)
         {
             throw new ArgumentException("Layer is not in this document.", nameof(layer));
         }
+
+        _block = Block(doc, layer);
+        _blockIndices = _block.Select(l => doc.Layers.IndexOf(l)).ToArray();
         _to = Math.Clamp(newIndex, 0, doc.Layers.Count - 1);
+
+        // How many of the block's other members already sit before the target index. They leave the
+        // list with the block, so the insertion point shifts back by that much: without this a
+        // three-layer group could not be moved to the bottom, because the target would be past the
+        // end of the list once its own members were removed.
+        var others = new HashSet<Layer>(_block);
+        others.Remove(_layer);
+        var count = 0;
+        for (var i = 0; i < _to && i < doc.Layers.Count; i++)
+        {
+            if (others.Contains(doc.Layers[i]))
+            {
+                count++;
+            }
+        }
+
+        _othersBefore = count;
     }
 
     public void Redo()
     {
-        _doc.Layers.RemoveAt(_from);
-        _doc.Layers.Insert(Math.Min(_to, _doc.Layers.Count), _layer);
+        foreach (var member in _block)
+        {
+            _doc.Layers.Remove(member);
+        }
+
+        var at = Math.Clamp(_to - _othersBefore, 0, _doc.Layers.Count);
+        for (var i = 0; i < _block.Count; i++)
+        {
+            _doc.Layers.Insert(at + i, _block[i]);
+        }
     }
 
     public void Undo()
     {
-        _doc.Layers.Remove(_layer);
-        _doc.Layers.Insert(Math.Min(_from, _doc.Layers.Count), _layer);
+        foreach (var member in _block)
+        {
+            _doc.Layers.Remove(member);
+        }
+
+        for (var i = 0; i < _block.Count; i++)
+        {
+            _doc.Layers.Insert(Math.Min(_blockIndices[i], _doc.Layers.Count), _block[i]);
+        }
+    }
+
+    /// <summary>
+    /// The layer plus every descendant, in list order, so the group and its children travel as one
+    /// block. A layer with no descendants yields a one-element block, which is the plain
+    /// single-layer move this command has always performed.
+    /// </summary>
+    private static List<Layer> Block(Document doc, Layer layer)
+    {
+        var descendants = LayerHierarchy.DescendantIds(doc.Layers, layer.Id);
+        return doc.Layers.Where(l => l == layer || descendants.Contains(l.Id)).ToList();
     }
 }
 

@@ -87,20 +87,77 @@ public static class LayerHierarchy
     }
 
     /// <summary>
+    /// The same layers reordered so every parent precedes its children, which is the order the
+    /// format documents and the one the load path relies on. Sibling order is preserved and the
+    /// traversal is stable, so a list already in canonical order comes back unchanged.
+    ///
+    /// Layers whose parent is absent from the list are kept, in their original relative order,
+    /// after the reachable ones. Validate rejects them, and dropping them here would turn a
+    /// diagnosable file into a silently lossy one.
+    /// </summary>
+    public static List<Layer> Normalize(IReadOnlyList<Layer> layers)
+    {
+        ArgumentNullException.ThrowIfNull(layers);
+        var children = GroupByParent(layers);
+        var emitted = new HashSet<Guid>();
+        var result = new List<Layer>(layers.Count);
+        Emit(children, string.Empty, result, emitted);
+        foreach (var layer in layers)
+        {
+            if (emitted.Add(layer.Id))
+            {
+                result.Add(layer);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Appends <paramref name="parent"/>'s children depth-first. <paramref name="emitted"/> is
+    /// what makes this terminate on a cyclic graph: a layer can only be added once, so a parent
+    /// that reaches itself stops instead of recursing forever.
+    /// </summary>
+    private static void Emit(
+        Dictionary<string, List<Layer>> children,
+        string parent,
+        List<Layer> result,
+        HashSet<Guid> emitted)
+    {
+        foreach (var layer in children.GetValueOrDefault(parent) ?? new List<Layer>())
+        {
+            if (!emitted.Add(layer.Id))
+            {
+                continue;
+            }
+
+            result.Add(layer);
+            if (layer.IsGroup)
+            {
+                Emit(children, layer.Id.ToString("D"), result, emitted);
+            }
+        }
+    }
+
+    /// <summary>
     /// Structural validation: unique ids, groups carry no pixels, a parent id
-    /// references an existing group, no cycles, depth within the cap.
-    /// Throws InvalidOperationException with the reason on the first violation.
+    /// references an existing group, no cycles, depth within the cap, and every
+    /// parent preceding its children in list order. Throws
+    /// InvalidOperationException with the reason on the first violation.
     /// </summary>
     public static void Validate(IReadOnlyList<Layer> layers)
     {
         ArgumentNullException.ThrowIfNull(layers);
         var byId = new Dictionary<Guid, Layer>(layers.Count);
-        foreach (var layer in layers)
+        var indexOf = new Dictionary<Guid, int>(layers.Count);
+        for (var i = 0; i < layers.Count; i++)
         {
+            var layer = layers[i];
             if (!byId.TryAdd(layer.Id, layer))
             {
                 throw new InvalidOperationException($"Duplicate layer id {layer.Id}.");
             }
+            indexOf[layer.Id] = i;
             if (layer.IsGroup && layer.Pixels is not null)
             {
                 throw new InvalidOperationException($"Group layer '{layer.Name}' must not carry pixels.");
@@ -131,6 +188,17 @@ public static class LayerHierarchy
                     throw new InvalidOperationException($"Layer '{layer.Name}' has non-group parent '{node.Name}'.");
                 }
                 parent = node.ParentId;
+            }
+
+            // Order is part of the invariant, not just structure. The format documents it and the
+            // load path reads layers in order, so a list that puts a child before its parent is a
+            // project that saves and then cannot be reopened. Checked here so the write path
+            // refuses it instead of writing a file that only fails later.
+            if (layer.ParentId is { } direct && indexOf.TryGetValue(direct, out var parentIndex)
+                && parentIndex > indexOf[layer.Id])
+            {
+                throw new InvalidOperationException(
+                    $"Layer '{layer.Name}' appears before its parent '{byId[direct].Name}' in the stack.");
             }
         }
     }

@@ -238,13 +238,20 @@ public sealed class UpdateApplierTests : IDisposable
     [Theory]
     [InlineData("it's here")]
     [InlineData("100% done")]
-    [InlineData("a \"quoted\" name")]
-    [InlineData("semi;colon & pipe|name")]
+    [InlineData("caret^name")]
+    [InlineData("bang!name")]
+    [InlineData("semi;colon & paren(name)")]
     public void UnusualInstallPathsAreHandledBecauseTheyAreArgumentsNotShellText(string directoryName)
     {
         // Each of these broke the generated script in a different way: an apostrophe ended the PowerShell
-        // literal, a percent was expanded by the batch parser, a quote ended the string, and the shell
-        // metacharacters were interpreted. Here they are just directory names.
+        // literal, a percent was expanded by the batch parser, a caret escaped the next character, a bang
+        // was history expansion, and the remaining metacharacters were interpreted. Here they are just
+        // directory names.
+        //
+        // A quote and a vertical bar are deliberately absent: both are illegal in a Windows file name, so
+        // an install path can never contain them and a test that builds one only fails on the machine that
+        // matters. What kept them harmless in the old script (and still does) is that no path reaches a
+        // batch context at all, which TheLauncherNamesNoPathOfItsOwn in UpdateStagerTests pins directly.
         var awkward = Path.Combine(_root, directoryName);
         Directory.CreateDirectory(awkward);
         File.WriteAllText(Path.Combine(awkward, UpdateStager.AppExecutable), "old executable");
@@ -260,6 +267,21 @@ public sealed class UpdateApplierTests : IDisposable
 
         Assert.True(result.Succeeded, result.Reason);
         Assert.Equal("new executable", File.ReadAllText(Path.Combine(awkward, UpdateStager.AppExecutable)));
+    }
+
+    [Fact]
+    public void TheQuoteAndThePipeAreNotDirectoryNamesOnWindowsAtAll()
+    {
+        // Why the theory above does not carry them: this is the fact the omission rests on, not a guess
+        // about which characters look scary.
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var illegal = Path.GetInvalidFileNameChars();
+        Assert.Contains('"', illegal);
+        Assert.Contains('|', illegal);
     }
 
     // ----- what staging writes is what applying reads -----

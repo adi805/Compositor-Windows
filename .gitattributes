@@ -1,0 +1,23 @@
+# Deterministic checkouts across platforms.
+#
+# Without this, git's autocrlf setting decides what the working tree gets, so the same commit is LF on a
+# Linux runner and CRLF on a Windows one. That difference is invisible until something hashes the bytes:
+# a test fixture built from a raw string literal takes its line endings from the source file, and the
+# release signature covers the checksum manifest byte for byte.
+#
+# The repository already stores LF in the index, so forcing LF on checkout changes nothing that is
+# committed and keeps every platform reading the same bytes.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted or merged as text.
+*.onnx binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+*.msi binary
+*.exe binary
+*.dll binary
+
+# Generated artifacts and lock files are diffed as text, but keep them out of merge conflicts.
+packages.lock.json -merge

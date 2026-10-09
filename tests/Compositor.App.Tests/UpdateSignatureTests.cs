@@ -16,10 +16,12 @@ namespace Compositor.App.Tests;
 /// </summary>
 public sealed class UpdateSignatureTests
 {
-    private const string Manifest = """
-        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Compositor-Windows-v0.4.0-win-x64.zip
-        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  other.zip
-        """;
+    // Built from explicit "\n" escapes rather than a raw string literal on purpose. A raw string literal
+    // takes its line endings from the source file, so this constant would be LF on a Linux checkout and
+    // CRLF on a Windows one: the very difference the test below exists to rule out.
+    private static readonly string Manifest =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  Compositor-Windows-v0.4.0-win-x64.zip\n"
+        + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  other.zip\n";
 
     // ----- the signature itself -----
 
@@ -160,8 +162,16 @@ public sealed class UpdateSignatureTests
         var signature = Sign(Manifest, key);
         var pem = key.ExportSubjectPublicKeyInfoPem();
 
-        Assert.True(ReleaseSignature.Verify(Manifest.Replace("\n", "\r\n", StringComparison.Ordinal), signature, pem));
-        Assert.Equal(ReleaseSignature.Payload(Manifest), ReleaseSignature.Payload(Manifest.Replace("\n", "\r\n", StringComparison.Ordinal)));
+        // Same lines, CRLF instead of LF.
+        var crlf = ManifestWithLineEndings("\r\n");
+
+        Assert.NotEqual(Manifest, crlf);
+        Assert.True(ReleaseSignature.Verify(crlf, signature, pem));
+        Assert.Equal(ReleaseSignature.Payload(Manifest), ReleaseSignature.Payload(crlf));
+
+        // The other checkout, and the reason the helper strips before re-joining: building it by appending
+        // to an already-terminated manifest would leave two newlines and change the bytes that are signed.
+        Assert.Equal(Manifest, ManifestWithLineEndings("\n"));
     }
 
     // ----- the trust decision the app actually makes -----
@@ -280,7 +290,10 @@ public sealed class UpdateSignatureTests
         return Convert.ToBase64String(signature);
     }
 
-    /// <summary>A manifest exactly as the release workflow writes it, for the parse tests below.</summary>
+    /// <summary>
+    /// The same manifest re-framed with <paramref name="ending"/>: identical lines, one trailing newline.
+    /// The trailing newline is stripped before re-joining so the helper cannot end up appending a second one.
+    /// </summary>
     private static string ManifestWithLineEndings(string ending) =>
-        string.Join(ending, Manifest.Split('\n')) + ending;
+        Manifest.TrimEnd('\n').Replace("\n", ending, StringComparison.Ordinal) + ending;
 }

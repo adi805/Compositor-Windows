@@ -11,18 +11,53 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      # Pinned to commit SHAs, not moving tags: a tag is not a fixed dependency.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: 8.0.x
       - name: Publish (win-x64, self-contained)
-        run: dotnet publish src/Compositor.App -c Release -r win-x64 --self-contained true -o publish
+        env:
+          # Baked into the assembly so the shipped binary can authenticate its own updates. A build
+          # without it carries no publisher key, and the updater says so rather than pretending it
+          # verified anything.
+          CompositorUpdatePublicKey: ${{ vars.UPDATE_PUBLIC_KEY }}
+        run: |
+          if [ -z "$CompositorUpdatePublicKey" ]; then
+            echo "::error::The UPDATE_PUBLIC_KEY repository variable is not set, so the published binary"
+            echo "::error::would carry no publisher key and could not authenticate its own updates."
+            echo "::error::See docs/UPDATE-SIGNING.md."
+            exit 1
+          fi
+          dotnet publish src/Compositor.App -c Release -r win-x64 --self-contained true -o publish \
+            -p:CompositorUpdatePublicKey="$CompositorUpdatePublicKey"
       - name: Zip
         run: |
           cd publish
           zip -r ../Compositor-Windows-${GITHUB_REF_NAME}-win-x64.zip .
       - name: Checksums
         run: sha256sum "Compositor-Windows-${GITHUB_REF_NAME}-win-x64.zip" > SHA256SUMS
+      - name: Sign the checksum manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          # The signature is what makes the checksum a statement by the publisher rather than by
+          # whoever could reach the release page: a compromised release credential can replace the zip
+          # and its SHA256SUMS together, and cannot produce this.
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::error::UPDATE_SIGNING_KEY is not set. The updater authenticates releases with a"
+            echo "::error::publisher key, so an unsigned release would be refused by every pinned build."
+            echo "::error::Generate a key and store the private half as the UPDATE_SIGNING_KEY secret:"
+            echo "::error::see docs/UPDATE-SIGNING.md."
+            exit 1
+          fi
+          printf '%s' "$UPDATE_SIGNING_KEY" > signing.key
+          openssl rsa -in signing.key -pubout -out signing.pub 2>/dev/null
+          openssl dgst -sha256 -sign signing.key -out SHA256SUMS.sig SHA256SUMS
+          # Round-trip it here rather than discovering a bad key when a user's update is refused.
+          openssl dgst -sha256 -verify signing.pub -signature SHA256SUMS.sig SHA256SUMS
+          rm -f signing.key signing.pub
+          echo "signed SHA256SUMS ($(wc -c < SHA256SUMS.sig) byte signature)"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -32,6 +67,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             "Compositor-Windows-${GITHUB_REF_NAME}-win-x64.zip" \
             "SHA256SUMS" \
+            "SHA256SUMS.sig" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Compositor.Windows ${GITHUB_REF_NAME}" \
             --notes-file "$NOTES" \

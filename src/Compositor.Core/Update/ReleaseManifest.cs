@@ -15,6 +15,7 @@ namespace Compositor.Core.Update;
 /// <param name="AssetSizeBytes">Size the release claims, checked against what arrives.</param>
 /// <param name="ChecksumsUrl">The sibling <c>SHA256SUMS</c> asset, or null when the release ships none.</param>
 /// <param name="Sha256">Hash of the asset, filled in by <see cref="ReleaseManifest.Resolve"/>; null until read.</param>
+/// <param name="SignatureUrl">The <c>SHA256SUMS.sig</c> asset authenticating the manifest, or null when absent.</param>
 public readonly record struct ReleaseInfo(
     string Tag,
     AppVersion Version,
@@ -24,7 +25,8 @@ public readonly record struct ReleaseInfo(
     string DownloadUrl,
     long AssetSizeBytes,
     string? ChecksumsUrl,
-    string? Sha256)
+    string? Sha256,
+    string? SignatureUrl = null)
 {
     /// <summary>Ready to download only once the hash is known: an unverified zip never gets staged.</summary>
     public bool IsDownloadable => DownloadUrl.Length > 0 && Sha256 is { Length: > 0 };
@@ -77,6 +79,7 @@ public static class ReleaseManifest
         string? downloadUrl = null;
         long size = 0;
         string? checksumsUrl = null;
+        string? signatureUrl = null;
         if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
         {
             foreach (var asset in assets.EnumerateArray())
@@ -100,6 +103,11 @@ public static class ReleaseManifest
                 {
                     checksumsUrl = url;
                 }
+                else if (string.Equals(name, ReleaseSignature.SignatureAssetName, StringComparison.OrdinalIgnoreCase)
+                    && signatureUrl is null)
+                {
+                    signatureUrl = url;
+                }
             }
         }
 
@@ -109,7 +117,7 @@ public static class ReleaseManifest
         }
 
         return new ReleaseInfo(tag, version, prerelease, pageUrl ?? string.Empty, assetName, downloadUrl, size,
-            checksumsUrl, Sha256: null);
+            checksumsUrl, Sha256: null, signatureUrl);
     }
 
     /// <summary>

@@ -310,4 +310,28 @@ public class SkiaCodecTests
         Assert.Equal(ImageFailure.ImportTooLarge, error.Failure);
         Assert.Contains($"{ImageBudget.DocumentBudgetMegapixels}-megapixel", error.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Budget_PerSurfaceCeilingHoldsWhenTheDocumentBudgetIsHuge()
+    {
+        // 30,000 x 20,000 is inside the per-side limit and would pass a 600 MP document budget,
+        // which is exactly what a machine with enough memory reports. Its RGBA form is
+        // 2,400,000,000 bytes, past int.MaxValue, so the per-surface ceiling is the only check
+        // that can refuse it and it must not be reachable by raising the other number.
+        var error = Assert.Throws<ImageException>(() =>
+            ImageBudget.ValidateImport(30_000, 20_000, 0, documentBudget: 800_000_000));
+
+        Assert.Equal(ImageFailure.ImportTooLarge, error.Failure);
+    }
+
+    [Fact]
+    public void Budget_ImportBoundaryAtThePerSurfaceCeilingIsExact()
+    {
+        // 14,142^2 = 199,996,164 px fits; 14,143^2 = 200,024,449 px does not. Both with a
+        // document budget large enough that only the per-surface ceiling is in play.
+        ImageBudget.ValidateImport(14_142, 14_142, 0, documentBudget: 800_000_000);
+
+        Assert.Throws<ImageException>(() =>
+            ImageBudget.ValidateImport(14_143, 14_143, 0, documentBudget: 800_000_000));
+    }
 }

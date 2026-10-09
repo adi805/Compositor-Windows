@@ -221,6 +221,80 @@ public class GeometryCommandsTests
     }
 
     [Fact]
+    public void ImageSize_RepeatedUndoRedo_RestoresLayersEveryTime()
+    {
+        // The bug: Undo() cleared the captured originals but left the capture flag set, so the
+        // second Redo skipped recapturing and the second Undo then walked an empty list. The
+        // document size came back and the layers did not, which is the state the issue describes.
+        var doc = new Document(4, 4) { Resolution = 72 };
+        var layer = PixelLayer("a", 4, 4);
+        doc.AddLayer(layer);
+        var originalPixels = (byte[])layer.Pixels!.Pixels.Clone();
+        var originalTransform = layer.Transform;
+
+        var cmd = new ImageSizeCommand(doc, 8, 8, 300);
+        cmd.Redo();
+        cmd.Undo();
+        cmd.Redo();
+        cmd.Undo();
+
+        Assert.Equal((4, 4), (doc.Width, doc.Height));
+        Assert.Equal(72, doc.Resolution);
+        Assert.Equal((4, 4), (layer.Pixels!.Width, layer.Pixels.Height));
+        Assert.Equal(originalPixels, layer.Pixels.Pixels);
+        Assert.Equal(originalTransform, layer.Transform);
+    }
+
+    [Fact]
+    public void ImageSize_ManyUndoRedoCycles_AreStable()
+    {
+        // Same invariant over more cycles: the restore must be exact on every one of them, not
+        // just the first, because the command is retained on the redo stack for the session.
+        var doc = new Document(6, 3) { Resolution = 96 };
+        var layer = PixelLayer("a", 6, 3);
+        doc.AddLayer(layer);
+        var originalPixels = (byte[])layer.Pixels!.Pixels.Clone();
+        var originalTransform = layer.Transform;
+
+        var cmd = new ImageSizeCommand(doc, 12, 6, 150);
+        for (var cycle = 0; cycle < 4; cycle++)
+        {
+            cmd.Redo();
+            Assert.Equal((12, 6), (doc.Width, doc.Height));
+            Assert.Equal(150, doc.Resolution);
+            Assert.Equal((12, 6), (layer.Pixels!.Width, layer.Pixels.Height));
+
+            cmd.Undo();
+            Assert.Equal((6, 3), (doc.Width, doc.Height));
+            Assert.Equal(96, doc.Resolution);
+            Assert.Equal((6, 3), (layer.Pixels!.Width, layer.Pixels.Height));
+            Assert.Equal(originalPixels, layer.Pixels.Pixels);
+            Assert.Equal(originalTransform, layer.Transform);
+        }
+    }
+
+    [Fact]
+    public void ImageSize_UndoRedoThroughHistory_RestoresLayers()
+    {
+        // The same sequence driven through UndoHistory rather than the command directly, which is
+        // how the app reaches it: Push executes on record, then the user's Ctrl+Z / Ctrl+Y.
+        var doc = new Document(4, 4);
+        var layer = PixelLayer("a", 4, 4);
+        doc.AddLayer(layer);
+        var originalPixels = (byte[])layer.Pixels!.Pixels.Clone();
+
+        var history = new UndoHistory();
+        history.Push(new ImageSizeCommand(doc, 8, 8, 72));
+        history.Undo();
+        history.Redo();
+        history.Undo();
+
+        Assert.Equal((4, 4), (doc.Width, doc.Height));
+        Assert.Equal((4, 4), (layer.Pixels!.Width, layer.Pixels.Height));
+        Assert.Equal(originalPixels, layer.Pixels.Pixels);
+    }
+
+    [Fact]
     public void ImageSize_RejectsCaps()
     {
         var doc = new Document(8, 8);

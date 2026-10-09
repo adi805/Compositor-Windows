@@ -224,6 +224,20 @@ public static class ProjectStore
         {
             throw new InvalidOperationException("Active layer is not in this document.");
         }
+
+        // The same hierarchy check the load path applies, run before the file is written. Without
+        // it a document with a child before its parent, a cycle, or a dangling parent was written
+        // without complaint and only refused when someone tried to reopen it: an ordinary edit
+        // could replace a usable project with an unreadable one. Failing here keeps the file that
+        // is already on disk intact, which is the whole point of validating before a write.
+        try
+        {
+            LayerHierarchy.Validate(doc.Layers);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException($"Invalid layer hierarchy: {ex.Message}", ex);
+        }
     }
 
     private static void ValidateDimensions(int width, int height)
@@ -383,7 +397,8 @@ public static class ProjectStore
                     $"Group layer '{layer.Name}' must not carry an image entry.");
             }
 
-            if (layer.ParentUuid is { } parentUuid && !layerIdByUuid.ContainsKey(parentUuid))
+            if (layer.ParentUuid is { } parentUuid && !parentUuid.Equals(layer.Uuid, StringComparison.Ordinal)
+                && !manifest.Layers.Any(l => string.Equals(l.Uuid, parentUuid, StringComparison.Ordinal)))
             {
                 throw new InvalidOperationException(
                     $"Layer '{layer.Name}' references missing parent '{parentUuid}'.");
@@ -445,8 +460,8 @@ public static class ProjectStore
             });
         }
 
-        // Second pass: resolve parent references (every layer now exists),
-        // then enforce the structural invariants before handing the doc out.
+        // Second pass: resolve parent references. Every layer is indexed by now, so a parent may
+        // appear anywhere in the list, not only before its children.
         for (var i = 0; i < manifest.Layers.Count; i++)
         {
             if (manifest.Layers[i].ParentUuid is { } parentUuid)
@@ -454,6 +469,14 @@ public static class ProjectStore
                 doc.Layers[i].ParentId = layerIdByUuid[parentUuid];
             }
         }
+
+        // The format documents that a parent precedes its children, and this reader relies on that
+        // order. Rather than reject a file that got the order wrong, put the layers into the order
+        // the format asks for: the references are already resolved, so reordering loses nothing and
+        // turns a file that would otherwise be unreadable into one that opens.
+        var ordered = LayerHierarchy.Normalize(doc.Layers);
+        doc.Layers.Clear();
+        doc.Layers.AddRange(ordered);
 
         try
         {

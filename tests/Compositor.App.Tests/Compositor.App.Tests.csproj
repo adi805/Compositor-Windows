@@ -11,7 +11,7 @@
     <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.22" />
     <!-- Only the subject-model spike needs the runtime; the app itself does not reference it yet,
          so keeping it here stops ~16 MB of native OnnxRuntime shipping in every release zip. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Compositor.App\Compositor.App.csproj" />

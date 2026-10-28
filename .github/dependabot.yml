@@ -1,0 +1,41 @@
+# Kenapa berkas ini ada: sebelumnya nol mekanisme yang memberi tahu kalau paket .NET atau
+# action CI kita punya versi yang menambal kerentanan. Alert saja tidak cukup, karena alert
+# tidak pernah membuka PR, jadi tidak ada yang benar-benar memperbaiki.
+version: 2
+
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Asia/Jakarta"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "adi805"
+    groups:
+      # Minor dan patch digabung jadi satu PR: operator tunggal tidak perlu menerima
+      # belasan PR per minggu. Major tetap terpisah karena bisa memecah API.
+      dotnet-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Asia/Jakarta"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "adi805"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"

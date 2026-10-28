@@ -1,0 +1,26 @@
+# Kenapa berkas ini ada: Dependabot mengusulkan, tapi tidak ada yang menolak PR yang menarik
+# masuk dependensi dengan kerentanan tingkat tinggi. Gate ini menilai diff manifest pada setiap
+# PR, bukan sesudah merge, jadi kerentanan tertangkap sebelum jadi riwayat main.
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Review dependency changes
+        # Dipin ke commit, bukan tag: tag itu ref yang bisa dipindah, dan action ini
+        # berjalan dengan izin pull-requests: write di repo publik.
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

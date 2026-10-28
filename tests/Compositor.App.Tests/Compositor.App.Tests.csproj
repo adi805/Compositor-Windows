@@ -8,7 +8,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.4" />
     <!-- Only the subject-model spike needs the runtime; the app itself does not reference it yet,
          so keeping it here stops ~16 MB of native OnnxRuntime shipping in every release zip. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />

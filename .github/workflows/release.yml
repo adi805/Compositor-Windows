@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
       - name: Record the commit under test
@@ -49,7 +49,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
       - name: Build
@@ -86,7 +86,7 @@ jobs:
     steps:
       # Pinned to commit SHAs, not moving tags: a tag is not a fixed dependency.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 8.0.x
       - name: Publish (win-x64, self-contained)

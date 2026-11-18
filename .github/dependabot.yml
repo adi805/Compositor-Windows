@@ -22,6 +22,14 @@ updates:
         update-types: ["minor", "patch"]
     labels:
       - "dependencies"
+    # Avalonia 12 bukan soal nomor versi, tapi soal runtime: analyzer-nya dikompilasi
+    # terhadap Roslyn 4.14, sementara repo ini masih dipin di SDK 8 (Roslyn 4.11),
+    # sehingga setiap job mati dengan CS9057 sebelum satu test pun jalan. Bump mayor
+    # ini hanya bermakna setelah migrasi net8.0 -> net10.0 (docs/RUNTIME-MIGRATION.md),
+    # jadi ditahan di sini alih-alih membuka PR merah baru setiap Senin.
+    ignore:
+      - dependency-name: "Avalonia*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -4,12 +4,12 @@
     "net8.0": {
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
-        "requested": "[17.14.1, )",
-        "resolved": "17.14.1",
-        "contentHash": "HJKqKOE+vshXra2aEHpi2TlxYX7Z9VFYkr+E5rwEvHC8eIXiyO+K9kNm8vmNom3e2rA56WqxU+/N9NJlLGXsJQ==",
+        "requested": "[17.14.2, )",
+        "resolved": "17.14.2",
+        "contentHash": "SvwMteSx1nlKYMx2oKAYBFQz4eBjhv82QdruQeybp6OSlhATzW8pK/wtDuAOSlNaf5UnFykaxd/7/eosRN9k0g==",
         "dependencies": {
-          "Microsoft.CodeCoverage": "17.14.1",
-          "Microsoft.TestPlatform.TestHost": "17.14.1"
+          "Microsoft.CodeCoverage": "17.14.2",
+          "Microsoft.TestPlatform.TestHost": "17.14.2"
         }
       },
       "xunit": {
@@ -31,23 +31,23 @@
       },
       "Microsoft.CodeCoverage": {
         "type": "Transitive",
-        "resolved": "17.14.1",
-        "contentHash": "pmTrhfFIoplzFVbhVwUquT+77CbGH+h4/3mBpdmIlYtBi9nAB+kKI6dN3A/nV4DFi3wLLx/BlHIPK+MkbQ6Tpg=="
+        "resolved": "17.14.2",
+        "contentHash": "ClUZus3UFavgM3ut4t0cfH7WHgrhc9RP1VCduJpmEGdt8Qn8NsF1IxP3GaUb2rnPck1HIO+IYSmIMZxeftCfhA=="
       },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
-        "resolved": "17.14.1",
-        "contentHash": "xTP1W6Mi6SWmuxd3a+jj9G9UoC850WGwZUps1Wah9r1ZxgXhdJfj1QqDLJkFjHDCvN42qDL2Ps5KjQYWUU0zcQ==",
+        "resolved": "17.14.2",
+        "contentHash": "Bd6FxwMQlDLwxPoAUTLvLtpkVYZK0zfvdMMtoxgV+4+gzS4u4lag0vd2/hazZI4i/GRd/mGndMrZWTZT5lyIdw==",
         "dependencies": {
           "System.Reflection.Metadata": "8.0.0"
         }
       },
       "Microsoft.TestPlatform.TestHost": {
         "type": "Transitive",
-        "resolved": "17.14.1",
-        "contentHash": "d78LPzGKkJwsJXAQwsbJJ7LE7D1wB+rAyhHHAaODF+RDSQ0NgMjDFkSA1Djw18VrxO76GlKAjRUhl+H8NL8Z+Q==",
+        "resolved": "17.14.2",
+        "contentHash": "caKAaaKcr2Yk3kBMozodubTFEGbCFPbw5tF3rBY0YU6B/nuIvo5vXHMPnjtIw57dYUKYVJmDpSkme/8Eastkzw==",
         "dependencies": {
-          "Microsoft.TestPlatform.ObjectModel": "17.14.1",
+          "Microsoft.TestPlatform.ObjectModel": "17.14.2",
           "Newtonsoft.Json": "13.0.3"
         }
       },

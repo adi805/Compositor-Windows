@@ -15,8 +15,8 @@ jobs:
     name: Uji commit yang di-tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 8.0.x
       - name: Record the commit under test
@@ -29,7 +29,9 @@ jobs:
             exit 1
           fi
       - name: Restore
-        run: dotnet restore Compositor.Windows.sln
+        # --locked-mode, so a tag cannot publish a graph that differs from the lock file it was
+        # reviewed with.
+        run: dotnet restore Compositor.Windows.sln --locked-mode
       - name: Build
         run: dotnet build Compositor.Windows.sln --no-restore -c Release
       - name: Test (Core)
@@ -48,12 +50,14 @@ jobs:
     needs: gate
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore Compositor.Windows.sln --locked-mode
       - name: Build
-        run: dotnet build Compositor.Windows.sln -c Release
+        run: dotnet build Compositor.Windows.sln --no-restore -c Release
       - name: Test (Core)
         run: dotnet test tests/Compositor.Core.Tests --no-build -c Release
       - name: Test (App)
